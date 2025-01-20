@@ -31,6 +31,13 @@ namespace CsvSerializer
         {
             options ??= DefaultOptions;
             var properties = typeof(T).GetProperties(BindingFlags.Public | BindingFlags.Instance);
+
+            // プロパティの型をチェック
+            foreach (var property in properties)
+            {
+                ValidatePropertyType(property);
+            }
+
             var stringBuilder = new StringBuilder();
 
             // ヘッダーの書き込み
@@ -56,6 +63,13 @@ namespace CsvSerializer
         {
             options ??= DefaultOptions;
             var properties = typeof(T).GetProperties(BindingFlags.Public | BindingFlags.Instance);
+
+            // プロパティの型をチェック
+            foreach (var property in properties)
+            {
+                ValidatePropertyType(property);
+            }
+
             using var reader = new StringReader(csvData);
 
             // ヘッダー行の処理
@@ -180,6 +194,30 @@ namespace CsvSerializer
                 }
             }
             return obj;
+        }
+
+        private static void ValidatePropertyType(PropertyInfo property)
+        {
+            var type = property.PropertyType;
+            if (IsComplexType(type))
+            {
+                throw new InvalidOperationException(
+                    $"Property '{property.Name}' of type '{type.Name}' is not supported. Only primitive types, string, and DateTime are supported.");
+            }
+        }
+
+        private static bool IsComplexType(Type type)
+        {
+            if (type.IsPrimitive || type == typeof(string) || type == typeof(DateTime))
+                return false;
+
+            if (type.IsGenericType)
+                return true;
+
+            if (type.IsClass && type != typeof(string))
+                return true;
+
+            return false;
         }
     }
 }

@@ -180,5 +180,44 @@ namespace CsvSerializer.UnitTests
                         "田中太郎;30;1993/05/15\r\n";
             Assert.Equal(expected, csv);
         }
+
+        public class ComplexTypeClass
+        {
+            public string Name { get; set; } = "";
+            public Dictionary<string, int> Scores { get; set; } = new();
+            public List<string> Tags { get; set; } = new();
+        }
+
+        [Fact]
+        public void Serialize_WithComplexTypes_ThrowsException()
+        {
+            // Arrange
+            var data = new List<ComplexTypeClass>
+            {
+                new ComplexTypeClass
+                {
+                    Name = "田中太郎",
+                    Scores = new Dictionary<string, int> { { "数学", 85 }, { "国語", 90 } },
+                    Tags = new List<string> { "生徒会", "野球部" }
+                }
+            };
+
+            // Act & Assert
+            var exception = Assert.Throws<InvalidOperationException>(() =>
+                CsvSerializer.Serialize(data));
+            Assert.Contains("Property 'Scores' of type 'Dictionary`2' is not supported", exception.Message);
+        }
+
+        [Fact]
+        public void Deserialize_WithComplexTypes_ThrowsException()
+        {
+            // Arrange
+            var csv = "Name,Scores,Tags\r\n田中太郎,{数学:85;国語:90},[生徒会;野球部]\r\n";
+
+            // Act & Assert
+            var exception = Assert.Throws<InvalidOperationException>(() =>
+                CsvSerializer.Deserialize<ComplexTypeClass>(csv).ToList());
+            Assert.Contains("Property 'Scores' of type 'Dictionary`2' is not supported", exception.Message);
+        }
     }
 }
