@@ -4,14 +4,9 @@ using System.Text;
 namespace CsvSerializer
 {
     [AttributeUsage(AttributeTargets.Property)]
-    public class CsvColumnAttribute : Attribute
+    public class CsvColumnAttribute(string name) : Attribute
     {
-        public string Name { get; }
-
-        public CsvColumnAttribute(string name)
-        {
-            Name = name;
-        }
+        public string Name { get; } = name;
     }
 
     public class CsvSerializerOptions
@@ -115,7 +110,7 @@ namespace CsvSerializer
             {
                 Type t when t == typeof(DateTime) => ((DateTime)value).ToString(options.DateTimeFormat),
                 Type t when t.IsEnum => value.ToString() ?? "",
-                Type t when value is IFormattable formattable => formattable.ToString(null, System.Globalization.CultureInfo.InvariantCulture),
+                Type when value is IFormattable formattable => formattable.ToString(null, System.Globalization.CultureInfo.InvariantCulture),
                 _ => value.ToString() ?? ""
             };
 
@@ -174,7 +169,7 @@ namespace CsvSerializer
         {
             var propertyNames = properties.Select(GetPropertyColumnName).ToArray();
             var missingHeaders = propertyNames.Except(headers).ToArray();
-            if (missingHeaders.Any())
+            if (missingHeaders.Length != 0)
             {
                 throw new InvalidOperationException($"Missing CSV headers: {string.Join(", ", missingHeaders)}");
             }

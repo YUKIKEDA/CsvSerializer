@@ -184,8 +184,8 @@ namespace CsvSerializer.UnitTests
         public class ComplexTypeClass
         {
             public string Name { get; set; } = "";
-            public Dictionary<string, int> Scores { get; set; } = new();
-            public List<string> Tags { get; set; } = new();
+            public Dictionary<string, int> Scores { get; set; } = [];
+            public List<string> Tags { get; set; } = [];
         }
 
         [Fact]
@@ -194,11 +194,10 @@ namespace CsvSerializer.UnitTests
             // Arrange
             var data = new List<ComplexTypeClass>
             {
-                new ComplexTypeClass
-                {
+                new() {
                     Name = "田中太郎",
                     Scores = new Dictionary<string, int> { { "数学", 85 }, { "国語", 90 } },
-                    Tags = new List<string> { "生徒会", "野球部" }
+                    Tags = ["生徒会", "野球部"]
                 }
             };
 
