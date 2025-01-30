@@ -7,10 +7,12 @@
 - オブジェクトからCSV形式への変換（シリアライズ）
 - CSV形式からオブジェクトへの変換（デシリアライズ）
 - カスタムヘッダー名のサポート（`CsvColumn`属性）
+- 辞書型（Dictionary）のサポート
 - カスタマイズ可能なオプション
   - 区切り文字の指定
   - ヘッダーの有無
   - 日時フォーマットの指定
+  - カルチャー情報の指定
 - 堅牢なエラーハンドリング
 - 高いパフォーマンス（StringBuilder最適化）
 - Nullableタイプのサポート
@@ -71,10 +73,36 @@ var options = new CsvSerializerOptions
 {
     Delimiter = ";",                    // 区切り文字の変更
     IncludeHeader = true,              // ヘッダー行の有無
-    DateTimeFormat = "yyyy/MM/dd"      // 日付フォーマットの指定
+    DateTimeFormat = "yyyy/MM/dd",     // 日付フォーマットの指定
+    Culture = new CultureInfo("ja-JP") // カルチャー情報の指定
 };
 
 string csv = CsvSerializer.Serialize(people, options);
+```
+
+### 辞書型の使用
+
+```csharp
+public class ScoreRecord
+{
+    public string Name { get; set; }
+    public Dictionary<string, int> Scores { get; set; }
+}
+
+var records = new List<ScoreRecord>
+{
+    new() {
+        Name = "田中太郎",
+        Scores = new Dictionary<string, int> {
+            { "数学", 85 },
+            { "国語", 90 }
+        }
+    }
+};
+
+// シリアライズ結果：
+// Name,数学,国語
+// 田中太郎,85,90
 ```
 
 ### Nullableタイプの使用
@@ -82,9 +110,10 @@ string csv = CsvSerializer.Serialize(people, options);
 ```csharp
 public class Employee
 {
-    public string Name { get; set; }
+    public string? Name { get; set; }
     public int? Age { get; set; }        // Nullable int
     public DateTime? StartDate { get; set; }  // Nullable DateTime
+    public UserStatus? Status { get; set; }   // Nullable Enum
 }
 ```
 
@@ -94,16 +123,19 @@ public class Employee
 - `string`
 - `DateTime`
 - 列挙型（`enum`）
+- 辞書型（`Dictionary<TKey, TValue>`）※キーと値は上記のサポート型に限る
 - 上記の型のNullableバージョン
 
 ## エラーハンドリング
 
-ライブラリは以下の場合に適切な例外を投げます：
+ライブラリは以下の場合に`CsvSerializationException`を投げます：
 
 - 無効なCSVフォーマット
 - データ型の変換エラー
 - 必須ヘッダーの欠落
 - サポートされていない型の使用
+- 空のCSVデータ
+- 無効な列挙型の値
 
 ```csharp
 try
@@ -120,6 +152,7 @@ catch (CsvSerializationException ex)
 
 - 大量のデータを処理する場合は、`Deserialize`メソッドが返す`IEnumerable<T>`を利用して、メモリ効率の良い処理が可能です
 - シリアライズ時は`StringBuilder`を使用して最適化されています
+- 空の行は自動的にスキップされます
 
 ## 要件
 
