@@ -188,6 +188,81 @@ namespace CsvSerializer.UnitTests
             public List<string> Tags { get; set; } = [];
         }
 
+        public enum UserStatus
+        {
+            Active,
+            Inactive,
+            Pending
+        }
+
+        public class EnumTestClass
+        {
+            public string Name { get; set; } = "";
+            public UserStatus Status { get; set; }
+            public UserStatus? NullableStatus { get; set; }
+            public Dictionary<UserStatus, int> StatusCounts { get; set; } = [];
+        }
+
+        [Fact]
+        public void Serialize_WithEnumTypes()
+        {
+            // Arrange
+            var data = new List<EnumTestClass>
+            {
+                new() {
+                    Name = "田中太郎",
+                    Status = UserStatus.Active,
+                    NullableStatus = UserStatus.Pending,
+                    StatusCounts = new Dictionary<UserStatus, int> {
+                        { UserStatus.Active, 10 },
+                        { UserStatus.Inactive, 5 }
+                    }
+                }
+            };
+
+            // Act
+            var csv = CsvSerializer.Serialize(data);
+
+            // Assert
+            var expected = "Name,Status,NullableStatus,Active,Inactive\r\n" +
+                        "田中太郎,Active,Pending,10,5\r\n";
+            Assert.Equal(expected, csv);
+        }
+
+        [Fact]
+        public void Deserialize_WithEnumTypes()
+        {
+            // Arrange
+            var csv = "Name,Status,NullableStatus,Active,Inactive\r\n" +
+                    "田中太郎,Active,Pending,10,5\r\n";
+
+            // Act
+            var result = CsvSerializer.Deserialize<EnumTestClass>(csv).ToList();
+
+            // Assert
+            Assert.Single(result);
+            var obj = result[0];
+            Assert.Equal("田中太郎", obj.Name);
+            Assert.Equal(UserStatus.Active, obj.Status);
+            Assert.Equal(UserStatus.Pending, obj.NullableStatus);
+            Assert.Equal(2, obj.StatusCounts.Count);
+            Assert.Equal(10, obj.StatusCounts[UserStatus.Active]);
+            Assert.Equal(5, obj.StatusCounts[UserStatus.Inactive]);
+        }
+
+        [Fact]
+        public void Deserialize_WithEnumTypes_InvalidValue()
+        {
+            // Arrange
+            var csv = "Name,Status,NullableStatus,StatusCounts\r\n" +
+                    "田中太郎,InvalidStatus,Pending,\"Active:10;Inactive:5\"\r\n";
+
+            // Act & Assert
+            var exception = Assert.Throws<CsvSerializationException>(() =>
+                CsvSerializer.Deserialize<EnumTestClass>(csv).ToList());
+            Assert.Contains("Failed to convert field 'InvalidStatus' to type", exception.Message);
+        }
+
         [Fact]
         public void Serialize_WithComplexTypes_ThrowsException()
         {
@@ -204,7 +279,7 @@ namespace CsvSerializer.UnitTests
             // Act & Assert
             var exception = Assert.Throws<InvalidOperationException>(() =>
                 CsvSerializer.Serialize(data));
-            Assert.Contains("Property 'Scores' of type 'Dictionary`2' is not supported", exception.Message);
+            Assert.Contains("is not supported. Only primitive types, string, and DateTime are supported", exception.Message);
         }
 
         [Fact]
@@ -216,7 +291,7 @@ namespace CsvSerializer.UnitTests
             // Act & Assert
             var exception = Assert.Throws<InvalidOperationException>(() =>
                 CsvSerializer.Deserialize<ComplexTypeClass>(csv).ToList());
-            Assert.Contains("Property 'Scores' of type 'Dictionary`2' is not supported", exception.Message);
+            Assert.Contains("is not supported. Only primitive types, string, and DateTime are supported", exception.Message);
         }
     }
 }

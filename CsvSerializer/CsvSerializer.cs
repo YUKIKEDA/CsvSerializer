@@ -1,5 +1,6 @@
 ﻿using System.Reflection;
 using System.Text;
+using System.Collections.Generic;
 
 namespace CsvSerializer
 {
@@ -25,6 +26,18 @@ namespace CsvSerializer
     public static class CsvSerializer
     {
         private static readonly CsvSerializerOptions DefaultOptions = new();
+        private static readonly Type[] SupportedPrimitiveTypes = 
+        {
+            typeof(string),
+            typeof(int),
+            typeof(long),
+            typeof(float),
+            typeof(double),
+            typeof(decimal),
+            typeof(bool),
+            typeof(DateTime),
+            typeof(char)
+        };
 
         public static string Serialize<T>(
             IEnumerable<T> objects,
@@ -40,21 +53,72 @@ namespace CsvSerializer
                 ValidatePropertyType(property);
             }
 
+            // Dictionary型のプロパティからすべてのキーを収集
+            var dictionaryKeys = new Dictionary<PropertyInfo, HashSet<object>>();
+            foreach (var property in properties)
+            {
+                if (IsDictionaryType(property.PropertyType))
+                {
+                    var keys = new HashSet<object>();
+                    foreach (var obj in objectsList)
+                    {
+                        var dict = obj.GetType().GetProperty(property.Name)?.GetValue(obj) as System.Collections.IDictionary;
+                        if (dict != null)
+                        {
+                            foreach (System.Collections.DictionaryEntry entry in dict)
+                            {
+                                keys.Add(entry.Key);
+                            }
+                        }
+                    }
+                    dictionaryKeys[property] = keys;
+                }
+            }
+
             // 予想される文字数に基づいて初期容量を設定
-            var estimatedCapacity = (objectsList.Count + 1) * properties.Length * 20;
+            var totalColumns = properties.Where(p => !IsDictionaryType(p.PropertyType)).Count() +
+                             dictionaryKeys.Sum(kvp => kvp.Value.Count);
+            var estimatedCapacity = (objectsList.Count + 1) * totalColumns * 20;
             var stringBuilder = new StringBuilder(estimatedCapacity);
 
             // ヘッダーの書き込み
             if (options.IncludeHeader)
             {
-                stringBuilder.AppendLine(string.Join(options.Delimiter,
-                    properties.Select(p => EscapeField(GetPropertyColumnName(p), options.Delimiter))));
+                var headers = new List<string>();
+                foreach (var property in properties)
+                {
+                    if (!IsDictionaryType(property.PropertyType))
+                    {
+                        headers.Add(EscapeField(GetPropertyColumnName(property), options.Delimiter));
+                    }
+                    else if (dictionaryKeys.TryGetValue(property, out var keys))
+                    {
+                        headers.AddRange(keys.Select(k => EscapeField(k.ToString() ?? "", options.Delimiter)));
+                    }
+                }
+                stringBuilder.AppendLine(string.Join(options.Delimiter, headers));
             }
 
             // データの書き込み
             foreach (var obj in objectsList)
             {
-                var fields = properties.Select(p => SerializeField(p.GetValue(obj), options));
+                var fields = new List<string>();
+                foreach (var property in properties)
+                {
+                    var value = property.GetValue(obj);
+                    if (!IsDictionaryType(property.PropertyType))
+                    {
+                        fields.Add(SerializeField(value, options));
+                    }
+                    else if (value is System.Collections.IDictionary dict && dictionaryKeys.TryGetValue(property, out var keys))
+                    {
+                        foreach (var key in keys)
+                        {
+                            var dictValue = dict[key];
+                            fields.Add(SerializeField(dictValue, options));
+                        }
+                    }
+                }
                 stringBuilder.AppendLine(string.Join(options.Delimiter, fields));
             }
 
@@ -78,10 +142,31 @@ namespace CsvSerializer
 
             // ヘッダー行の処理
             string? headerLine = reader.ReadLine() ?? throw new InvalidOperationException("CSV data is empty.");
-            if (options.IncludeHeader)
+            var headers = ParseLine(headerLine, options.Delimiter);
+
+            // 必須ヘッダーの検証
+            var requiredHeaders = properties
+                .Where(p => !IsDictionaryType(p.PropertyType))
+                .Select(GetPropertyColumnName)
+                .ToArray();
+            var missingHeaders = requiredHeaders.Except(headers).ToArray();
+            if (missingHeaders.Length > 0)
             {
-                var headers = ParseLine(headerLine, options.Delimiter);
-                ValidateHeaders(headers, properties);
+                throw new InvalidOperationException($"Missing CSV headers: {string.Join(", ", missingHeaders)}");
+            }
+
+            // Dictionary型のプロパティとそのヘッダーの対応を作成
+            var dictionaryMappings = new Dictionary<PropertyInfo, (Type KeyType, HashSet<string> Headers)>();
+            foreach (var property in properties)
+            {
+                if (IsDictionaryType(property.PropertyType))
+                {
+                    var keyType = property.PropertyType.GetGenericArguments()[0];
+                    var dictHeaders = headers.Where(h => !properties.Any(p => 
+                        !IsDictionaryType(p.PropertyType) && GetPropertyColumnName(p) == h))
+                        .ToHashSet();
+                    dictionaryMappings[property] = (keyType, dictHeaders);
+                }
             }
 
             // データの読み込み
@@ -89,7 +174,8 @@ namespace CsvSerializer
             while ((line = reader.ReadLine()) != null)
             {
                 if (string.IsNullOrWhiteSpace(line)) continue;
-                yield return CreateObject<T>(ParseLine(line, options.Delimiter), properties);
+                var fields = ParseLine(line, options.Delimiter);
+                yield return CreateObject<T>(fields, headers, properties, dictionaryMappings);
             }
         }
 
@@ -115,6 +201,31 @@ namespace CsvSerializer
             };
 
             return EscapeField(stringValue, options.Delimiter);
+        }
+
+        private static object? DeserializeField(string field, Type targetType)
+        {
+            if (string.IsNullOrEmpty(field))
+                return null;
+
+            return DeserializeValue(field, targetType);
+        }
+
+        private static object DeserializeValue(string value, Type targetType)
+        {
+            var underlyingType = Nullable.GetUnderlyingType(targetType) ?? targetType;
+
+            if (underlyingType.IsEnum)
+            {
+                var enumValue = Enum.Parse(underlyingType, value);
+                if (IsNullableType(targetType))
+                {
+                    return Activator.CreateInstance(targetType, enumValue)!;
+                }
+                return enumValue;
+            }
+
+            return Convert.ChangeType(value, underlyingType, System.Globalization.CultureInfo.InvariantCulture);
         }
 
         private static string EscapeField(string field, string delimiter)
@@ -181,39 +292,81 @@ namespace CsvSerializer
             return attribute?.Name ?? property.Name;
         }
 
-        private static T CreateObject<T>(string[] fields, PropertyInfo[] properties) where T : class, new()
+        private static T CreateObject<T>(
+            string[] fields, 
+            string[] headers, 
+            PropertyInfo[] properties,
+            Dictionary<PropertyInfo, (Type KeyType, HashSet<string> Headers)> dictionaryMappings) where T : class, new()
         {
             var obj = new T();
-            var headerToProperty = properties.ToDictionary(GetPropertyColumnName, p => p);
 
-            for (int i = 0; i < fields.Length; i++)
+            for (int i = 0; i < headers.Length; i++)
             {
-                var headerName = GetPropertyColumnName(properties[i]);
-                if (!headerToProperty.TryGetValue(headerName, out var property))
-                    continue;
+                var header = headers[i];
+                var field = i < fields.Length ? fields[i] : "";
 
-                var field = fields[i];
-                if (string.IsNullOrEmpty(field))
+                // 通常のプロパティの処理
+                var normalProperty = properties.FirstOrDefault(p => 
+                    !IsDictionaryType(p.PropertyType) && GetPropertyColumnName(p) == header);
+                
+                if (normalProperty != null)
                 {
-                    if (IsNullableType(property.PropertyType))
+                    if (string.IsNullOrEmpty(field))
                     {
-                        property.SetValue(obj, null);
+                        if (IsNullableType(normalProperty.PropertyType))
+                        {
+                            normalProperty.SetValue(obj, null);
+                        }
+                        continue;
                     }
-                    continue;
-                }
 
-                try
-                {
-                    var targetType = Nullable.GetUnderlyingType(property.PropertyType) ?? property.PropertyType;
-                    object value = Convert.ChangeType(field, targetType, System.Globalization.CultureInfo.InvariantCulture);
-                    property.SetValue(obj, value);
+                    try
+                    {
+                        var value = DeserializeField(field, normalProperty.PropertyType);
+                        normalProperty.SetValue(obj, value);
+                    }
+                    catch (Exception ex)
+                    {
+                        throw new CsvSerializationException(
+                            $"Failed to convert field '{field}' to type {normalProperty.PropertyType} for property {normalProperty.Name}", ex);
+                    }
                 }
-                catch (Exception ex)
+                else
                 {
-                    throw new CsvSerializationException(
-                        $"Failed to convert field '{field}' to type {property.PropertyType} for property {property.Name}", ex);
+                    // Dictionary型プロパティの処理
+                    foreach (var dictMapping in dictionaryMappings)
+                    {
+                        var (keyType, dictHeaders) = dictMapping.Value;
+                        if (dictHeaders.Contains(header))
+                        {
+                            var dictProperty = dictMapping.Key;
+                            var dict = (System.Collections.IDictionary?)dictProperty.GetValue(obj);
+                            if (dict == null)
+                            {
+                                dict = (System.Collections.IDictionary)Activator.CreateInstance(dictProperty.PropertyType)!;
+                                dictProperty.SetValue(obj, dict);
+                            }
+
+                            if (!string.IsNullOrEmpty(field))
+                            {
+                                var valueType = dictProperty.PropertyType.GetGenericArguments()[1];
+                                try
+                                {
+                                    var key = DeserializeValue(header, keyType);
+                                    var value = DeserializeValue(field, valueType);
+                                    dict[key] = value;
+                                }
+                                catch (Exception ex)
+                                {
+                                    throw new CsvSerializationException(
+                                        $"Failed to convert field '{field}' to type {valueType} for dictionary key {header}", ex);
+                                }
+                            }
+                        }
+                    }
                 }
             }
+
             return obj;
         }
 
@@ -234,8 +387,21 @@ namespace CsvSerializer
 
         private static bool IsComplexType(Type type)
         {
-            if (type.IsPrimitive || type == typeof(string) || type == typeof(DateTime))
+            if (type.IsPrimitive || SupportedPrimitiveTypes.Contains(type))
                 return false;
+
+            // Nullable<T>の場合、内部の型をチェック
+            if (IsNullableType(type))
+            {
+                var underlyingType = Nullable.GetUnderlyingType(type)!;
+                return IsComplexType(underlyingType);
+            }
+
+            if (IsDictionaryType(type))
+            {
+                var genericArgs = type.GetGenericArguments();
+                return genericArgs.Any(arg => !IsSupportedType(arg));
+            }
 
             if (type.IsGenericType)
                 return true;
@@ -243,7 +409,31 @@ namespace CsvSerializer
             if (type.IsClass && type != typeof(string))
                 return true;
 
+            // enum型はサポート対象
+            if (type.IsEnum)
+                return false;
+
             return false;
+        }
+
+        private static bool IsDictionaryType(Type type)
+        {
+            return type.IsGenericType && 
+                   (type.GetGenericTypeDefinition() == typeof(Dictionary<,>) ||
+                    type.GetGenericTypeDefinition() == typeof(IDictionary<,>));
+        }
+
+        private static bool IsSupportedType(Type type)
+        {
+            if (IsNullableType(type))
+            {
+                var underlyingType = Nullable.GetUnderlyingType(type)!;
+                return IsSupportedType(underlyingType);
+            }
+
+            return type.IsPrimitive || 
+                   SupportedPrimitiveTypes.Contains(type) || 
+                   type.IsEnum;
         }
     }
 }
