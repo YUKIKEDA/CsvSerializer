@@ -27,8 +27,8 @@ namespace CsvSerializer
     public static class CsvSerializer
     {
         private static readonly CsvSerializerOptions DefaultOptions = new();
-        private static readonly HashSet<Type> SupportedPrimitiveTypes = new()
-        {
+        private static readonly HashSet<Type> SupportedPrimitiveTypes =
+        [
             typeof(string),
             typeof(int),
             typeof(long),
@@ -38,7 +38,7 @@ namespace CsvSerializer
             typeof(bool),
             typeof(DateTime),
             typeof(char)
-        };
+        ];
 
         #region Public Methods
 
