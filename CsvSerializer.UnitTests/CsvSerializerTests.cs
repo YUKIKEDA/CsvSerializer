@@ -132,7 +132,7 @@ namespace CsvSerializer.UnitTests
                     "田中太郎,30\r\n";
 
             // Act & Assert
-            var exception = Assert.Throws<InvalidOperationException>(() =>
+            var exception = Assert.Throws<CsvSerializationException>(() =>
                 CsvSerializer.Deserialize<TestClassWithCustomHeaders>(csv).ToList());
             Assert.Contains("Missing CSV headers: 生年月日", exception.Message);
         }
@@ -277,7 +277,7 @@ namespace CsvSerializer.UnitTests
             };
 
             // Act & Assert
-            var exception = Assert.Throws<InvalidOperationException>(() =>
+            var exception = Assert.Throws<CsvSerializationException>(() =>
                 CsvSerializer.Serialize(data));
             Assert.Contains("is not supported. Only primitive types, string, and DateTime are supported", exception.Message);
         }
@@ -289,7 +289,7 @@ namespace CsvSerializer.UnitTests
             var csv = "Name,Scores,Tags\r\n田中太郎,{数学:85;国語:90},[生徒会;野球部]\r\n";
 
             // Act & Assert
-            var exception = Assert.Throws<InvalidOperationException>(() =>
+            var exception = Assert.Throws<CsvSerializationException>(() =>
                 CsvSerializer.Deserialize<ComplexTypeClass>(csv).ToList());
             Assert.Contains("is not supported. Only primitive types, string, and DateTime are supported", exception.Message);
         }
